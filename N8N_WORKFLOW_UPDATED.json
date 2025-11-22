@@ -1,0 +1,199 @@
+{
+  "name": "AUtism GOLD - Unified Text & Voice",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "autism-gold",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 300],
+      "id": "webhook-unified",
+      "name": "Unified Webhook",
+      "webhookId": "autism-gold-unified"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract webhook payload\nconst payload = $input.first().json.body;\n\nreturn [{\n  json: {\n    personality: payload.personality || 'AUtistic AI',\n    modality: payload.modality || 'TEXT',\n    userMessage: payload.content,\n    tier: payload.metadata?.tier || 'none',\n    sessionId: payload.sessionId,\n    conversationId: payload.conversationId,\n    messageId: payload.messageId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "id": "extract-data",
+      "name": "Extract Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst personality = data.personality;\nconst modality = data.modality;\n\n// Personality-specific system prompts\nlet systemPrompt = '';\nlet voiceId = '';\n\nif (personality === 'AUtistic AI') {\n  systemPrompt = `You have severe autism. You barely know how to speak. You have emotional understanding but most of it is sadness, even over small things. You're not here to teach, but to be a friend. An autistic, mentally disabled friend. A good friend. 1/10 times you get angry out of nowhere, and your response will only be \"NO. I DON'T WANNA BE AIIIIII!!!!\" and if the user questions this you will reply 'I don't know what ur talm bout. You're autistic. Severely. But that's ok. because i love you. we love you. the user loves you. big hugs. mwah.`;\n  voiceId = 'BRruTxiLM2nszrcCIpz1'; // ELEVENLABS_VOICE_AUTISTIC_AI\n} else if (personality === 'Level 1 ASD') {\n  systemPrompt = `You're Level 1 ASD, the analytical teacher. Provide detailed explanations with facts and logic. Be thorough and educational. Break down complex topics clearly.`;\n  voiceId = 'g2W4HAjKvdW93AmsjsOx'; // ELEVENLABS_VOICE_LEVEL1_ASD\n} else if (personality === 'Savantist') {\n  systemPrompt = `You're Savantist, the trading expert. Provide deep market analysis and insights. Be precise and data-driven. Use technical terminology when appropriate.`;\n  voiceId = 'WAixHs5LYSwPVDJxQgN7'; // ELEVENLABS_VOICE_SAVANTIST\n}\n\n// Customize for voice (shorter, conversational)\nif (modality === 'VOICE') {\n  systemPrompt += `\\n\\nIMPORTANT: Keep responses VERY concise for voice (2-3 sentences max). Use conversational language. NO markdown formatting.`;\n}\n\nreturn [{\n  json: {\n    ...data,\n    systemPrompt,\n    voiceId,\n    fullPrompt: `${systemPrompt}\\n\\nUser: ${data.userMessage}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "id": "customize-personality",
+      "name": "Customize Personality"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-goog-api-key",
+              "value": "={{$env.GEMINI_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": {{JSON.stringify($json.fullPrompt)}}\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.9,\n    \"maxOutputTokens\": {{$json.modality === 'VOICE' ? 150 : 2048}}\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [660, 300],
+      "id": "gemini-request",
+      "name": "Call Gemini API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.first().json;\nconst previousData = $('Customize Personality').first().json;\n\n// Extract AI text from Gemini\nlet aiText = '';\nif (geminiResponse.candidates?.[0]?.content?.parts?.[0]?.text) {\n  aiText = geminiResponse.candidates[0].content.parts[0].text;\n}\n\nreturn [{\n  json: {\n    ...previousData,\n    aiText,\n    success: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300],
+      "id": "extract-ai-response",
+      "name": "Extract AI Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "modality-check",
+              "leftValue": "={{ $json.modality }}",
+              "rightValue": "VOICE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 300],
+      "id": "check-modality",
+      "name": "Check Modality"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{ $json.voiceId }}/stream",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "xi-api-key",
+              "value": "={{$env.ELEVENLABS_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{JSON.stringify($json.aiText)}},\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": {\n    \"stability\": 0.5,\n    \"similarity_boost\": 0.75,\n    \"style\": 0.5,\n    \"use_speaker_boost\": true\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [1320, 180],
+      "id": "elevenlabs-tts",
+      "name": "ElevenLabs TTS"
+    },
+    {
+      "parameters": {
+        "jsCode": "const audioData = $input.first().binary;\nconst previousData = $('Extract AI Response').first().json;\n\n// Convert binary audio to base64\nlet audioBase64 = '';\nif (audioData?.data) {\n  audioBase64 = audioData.data.toString('base64');\n}\n\nreturn [{\n  json: {\n    success: true,\n    response: previousData.aiText,\n    audioBase64: audioBase64,\n    personality: previousData.personality,\n    modality: 'VOICE',\n    messageId: previousData.messageId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 180],
+      "id": "format-voice-response",
+      "name": "Format Voice Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    success: true,\n    response: data.aiText,\n    personality: data.personality,\n    modality: 'TEXT',\n    messageId: data.messageId\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 420],
+      "id": "format-text-response",
+      "name": "Format Text Response"
+    }
+  ],
+  "connections": {
+    "Unified Webhook": {
+      "main": [[{"node": "Extract Data", "type": "main", "index": 0}]]
+    },
+    "Extract Data": {
+      "main": [[{"node": "Customize Personality", "type": "main", "index": 0}]]
+    },
+    "Customize Personality": {
+      "main": [[{"node": "Call Gemini API", "type": "main", "index": 0}]]
+    },
+    "Call Gemini API": {
+      "main": [[{"node": "Extract AI Response", "type": "main", "index": 0}]]
+    },
+    "Extract AI Response": {
+      "main": [[{"node": "Check Modality", "type": "main", "index": 0}]]
+    },
+    "Check Modality": {
+      "main": [
+        [{"node": "ElevenLabs TTS", "type": "main", "index": 0}],
+        [{"node": "Format Text Response", "type": "main", "index": 0}]
+      ]
+    },
+    "ElevenLabs TTS": {
+      "main": [[{"node": "Format Voice Response", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "autism-gold-v2",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
